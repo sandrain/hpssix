@@ -1,0 +1,88 @@
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# autoconf
+aclocal.m4
+autom4te.cache
+ar-lib
+build
+config.*
+configure
+cscope.*
+depcomp
+install-sh
+libtool
+ltmain.sh
+Makefile
+Makefile.in
+missing
+stamp-h1
+test-driver
+*compile
+*.gcda
+*.gcno
+*.sw?
+*~
+*.lo
+*.la
+*.o
+*.tar.gz
+*.rpm
+*.diff
+*.patch
+.libs
+.deps
+
+# nfs garbage
+.nfs*
+
+# project files
+dep
+extras/hpssix.conf
+libhpssix.pc
+tests/src/test-config
+tests/src/test-db
+tools/extractor/hpssix-extractor
+tools/scanner/hpssix-scanner
+

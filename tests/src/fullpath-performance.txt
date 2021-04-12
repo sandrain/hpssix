@@ -1,0 +1,18 @@
+## starting the process..
+## done.
+## took 33.673961 seconds to process 2000 records (59.393 rec/sec).
+## starting the process..
+## done.
+## took 66.364859 seconds to process 4000 records (60.273 rec/sec).
+## starting the process..
+## done.
+## took 100.064971 seconds to process 6000 records (59.961 rec/sec).
+## starting the process..
+## done.
+## took 132.502541 seconds to process 8000 records (60.376 rec/sec).
+## starting the process..
+## done.
+## took 166.132324 seconds to process 10000 records (60.193 rec/sec).
+## starting the process..
+## done.
+## took 199.198562 seconds to process 12000 records (60.241 rec/sec).

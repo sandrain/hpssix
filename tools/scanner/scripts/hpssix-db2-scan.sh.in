@@ -1,0 +1,179 @@
+#!/bin/bash
+#
+# usage: hpssix-db2-new-insert.sh <db2cmd> <db2user> <db2password> \
+#                                 <last objid> <fromdate> <outdir> <ts>
+#
+
+function die() {
+    echo "## ERROR: $1"
+    exit 1
+}
+
+function timestamp() {
+    date +"%s.%N"
+}
+
+# $1: before, $2: after
+function timegap() {
+    echo "scale=9; $2 - $1" | bc -l
+}
+
+
+if [ $# -ne 7 ]; then
+    die "Please check the usage."
+fi
+
+db2cli="$1"
+db2user="$2"
+db2password="$3"
+last_objid="$4"
+fromdate="$5"
+outdir="$6"
+ts="$7"
+
+## db2 command line options
+# -s: stop execution if error occurs
+# -t: use semicolon (;) as the statement termination character
+# -v: echo command to stdout
+db2cmd="$db2cli -stv"
+
+out_fattr="${outdir}/scanner.${ts}.fattr.csv"
+out_path="${outdir}/scanner.${ts}.path.csv"
+out_xattr="${outdir}/scanner.${ts}.xattr.csv"
+out_deleted="${outdir}/scanner.${ts}.deleted.csv"
+
+## table/field names are blinded
+
+sql_fattr="EXPORT TO ${out_fattr} OF DEL
+SELECT
+  n.objid,
+  COALESCE(ASCII(n.type), 0),
+  COALESCE(ASCII(n.uperms), 0),
+  COALESCE(ASCII(n.gperms), 0),
+  COALESCE(ASCII(n.operms), 0),
+  COALESCE(b.linkcount, 0),
+  COALESCE(n.uid, 0),
+  COALESCE(n.gid, 0),
+  COALESCE(b.datalen, 0),
+  COALESCE(b.readtime, 0),
+  COALESCE(b.writetime, 0),
+  COALESCE(b.modifytime, 0)
+FROM
+  objecttable n
+    INNER JOIN session.temp t ON n.objid = t.objid
+    LEFT OUTER JOIN fileinfo b ON n.fileinfo_id = b.fileinfo_id
+ORDER BY n.objid ASC;"
+
+sql_path="EXPORT TO ${out_path} OF DEL
+WITH fullpath (leaf, objid, parent_id, path) AS (
+  SELECT objid AS leaf, objid, parent_id, '/' || name FROM objecttable
+   WHERE objid IN (SELECT objid FROM session.temp)
+  UNION ALL
+  SELECT p.leaf AS leaf, n.objid, n.parent_id, '/' || name || p.path
+    FROM fullpath p, objecttable n WHERE p.parent_id = n.objid)
+SELECT
+  t.objid,
+  f.path
+FROM session.temp t JOIN fullpath f ON t.objid = f.leaf
+WHERE parent_id = 1 ORDER BY t.objid ASC;"
+
+sql_xattr="EXPORT TO ${out_xattr} OF DEL
+SELECT
+  u.objid,
+  XMLSERIALIZE(u.attributes AS CLOB)
+FROM uxattrs u
+  INNER JOIN session.temp t 
+  ON u.objid = t.objid;"
+
+sql_deleted="EXPORT TO ${out_deleted} OF DEL
+SELECT h.objid
+FROM (SELECT DISTINCT objid FROM objecttable_history
+      WHERE s_end > '${fromdate}') h
+  LEFT OUTER JOIN (SELECT objid FROM objecttable) n
+     ON h.objid = n.objid
+WHERE n.objid IS NULL ORDER BY h.objid ASC;"
+
+## execute queries
+
+t_start=$(timestamp)
+
+$db2cmd connect to hsubsys1 user $db2user using $db2password \
+    || die "connect to database failed"
+
+$db2cmd set schema hpss || die "failed to set hpss schema"
+
+t1=$(timestamp)
+
+$db2cmd "CREATE GLOBAL TEMPORARY TABLE session.temp (
+  objid BIGINT) ON COMMIT PRESERVE ROWS;"
+$db2cmd "CREATE UNIQUE INDEX session.tempix ON session.temp (objid);"
+
+$db2cmd "INSERT INTO session.temp
+  (SELECT objid FROM objecttable WHERE objid > ${last_objid});"
+
+$db2cmd "INSERT INTO session.temp
+  (SELECT DISTINCT objid FROM objecttable_history
+    WHERE objid <= ${last_objid}
+      AND sys_end > '${fromdate}');"
+
+$db2cmd "MERGE INTO session.temp st
+  USING (SELECT n.objid
+           FROM (SELECT objid, fileinfo_id FROM objecttable
+                   WHERE objid <= ${last_objid}) n
+                INNER JOIN
+                (SELECT DISTINCT fileinfo_id FROM fileinfo_history
+                  WHERE sys_end > '${fromdate}') b
+                ON n.fileinfo_id = b.fildinfo_id) bf
+  ON (st.objid = bf.objid)
+  WHEN NOT MATCHED THEN
+    INSERT (objid) VALUES (bf.objid)
+  ELSE IGNORE;"
+
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo -e "## collecting target objects: $tt seconds\n\n"
+
+t1=$(timestamp)
+$db2cmd "$sql_fattr"
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo -e "## collecting fattr: $tt seconds\n\n"
+
+t1=$(timestamp)
+$db2cmd "$sql_path"
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo -e "## collecting path: $tt seconds\n\n"
+
+t1=$(timestamp)
+$db2cmd "$sql_xattr"
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo -e "## collecting xattr: $tt seconds\n\n"
+
+t1=$(timestamp)
+$db2cmd "$sql_deleted"
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo -e "## collecting deleted: $tt seconds\n\n"
+
+t_end=$(timestamp)
+
+$db2cmd "DROP INDEX session.tempix;"
+$db2cmd "DROP TABLE session.temp;"
+$db2cmd connect reset
+
+total_tt=$(timegap $t_start $t_end)
+end_oid="`tail -n1 ${out_fattr} | cut -f1 -d','`"
+new_count="`cat ${out_fattr} | wc -l`"
+deleted_count="`cat ${out_deleted} | wc -l`"
+
+echo
+echo "## start oid: $((last_objid+1))"
+echo "## end oid: ${end_oid}"
+echo "## scanned: $new_count"
+echo "## deleted: $deleted_count"
+echo "## total execution: $total_tt seconds"
+
+exit 0
+

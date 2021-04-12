@@ -1,0 +1,25 @@
+# Document file extensions.
+#
+# This is a whitelist, meaning that the contents from files having the
+# following extensions will be extracted and indexed.
+doc
+docx
+odt
+pdf
+rft
+tex
+txt
+wks
+wps
+wpd
+ppt
+pptx
+xls
+xlsx
+h5
+nc
+md
+htm
+html
+src
+xml

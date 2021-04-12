@@ -1,0 +1,12 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@/hpssix
+
+Name: libhpssix
+Description: HPSSIX programming interface
+Url: https://techint.nccs.gov
+Version: @LIBHPSSIX_API_VERSION@
+Requires:
+Libs: -L${libdir} -lhpssix
+Cflags: -I${includedir}

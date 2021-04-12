@@ -1,0 +1,138 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <limits.h>
+#include <errno.h>
+#include <assert.h>
+#include <sys/time.h>
+
+static char *inputfile;
+static char *outputfile;
+static char linebuf[LINE_MAX];
+
+static uint64_t count;
+static uint64_t test_count;
+static struct timeval start, end;
+
+static inline double timediff(struct timeval *t1, struct timeval *t2)
+{
+    double sec = 1.0F*(t2->tv_sec - t1->tv_sec);
+    double usec = 1.0F*(t2->tv_usec - t1->tv_usec);
+
+    return sec + usec*(1e-6);
+}
+
+static inline int read_object_id(char *line)
+{
+    int oid = 0;
+    char *pos = strchr(line, ',');
+
+    *pos = '\0';
+    oid = strtoull(line, NULL, 0);
+    *pos = ',';
+
+    pos = &line[strlen(line)-1];
+    if (isspace(pos[0]))
+        *pos = '\0';
+
+    return oid;
+}
+
+EXEC SQL INCLUDE SQLCA;
+
+#define DUMP_SQLCA()                                                 \
+  {                                                                  \
+    printf("**********  DUMP OF SQLCA  **********************\n");   \
+    printf("SQLCAID: %s\n", sqlca.sqlcaid);                          \
+    printf("SQLCABC: %d\n", sqlca.sqlcabc);                          \
+    printf("SQLCODE: %d\n", sqlca.sqlcode);                          \
+    printf("SQLERRML: %d\n", sqlca.sqlerrml);                        \
+    printf("SQLERRD[0]: %d\n", sqlca.sqlerrd[0]);                    \
+    printf("SQLERRD[1]: %d\n", sqlca.sqlerrd[1]);                    \
+    printf("SQLERRD[2]: %d\n", sqlca.sqlerrd[2]);                    \
+    printf("SQLERRD[3]: %d\n", sqlca.sqlerrd[3]);                    \
+    printf("SQLERRD[4]: %d\n", sqlca.sqlerrd[4]);                    \
+    printf("SQLERRD[5]: %d\n", sqlca.sqlerrd[5]);                    \
+    printf("SQLWARN: %s\n", sqlca.sqlwarn);                          \
+    printf("SQLSTATE: %s\n", sqlca.sqlstate);                        \
+    printf("**********  END OF SQLCA DUMP  *******************\n");  \
+  }
+
+int main(int argc, char **argv)
+{
+    int ret = 0;
+    FILE *fp = NULL;
+    FILE *fp_out = NULL;
+    double elapsed = .0F;
+
+    EXEC SQL BEGIN DECLARE SECTION;
+    int oid;
+    char path[4096] = { 0, };
+    EXEC SQL END DECLARE SECTION;
+
+    if (argc != 4) {
+        printf("usage: %s <inputfile> <outputfile> <test_count>\n");
+        return 1;
+    }
+
+    inputfile = argv[1];
+    outputfile = argv[2];
+    test_count = strtoull(argv[3], NULL, 0);
+
+    EXEC SQL CONNECT TO hsubsys1 USER hpss USING oldrat99;
+
+    fp = fopen(inputfile, "r");
+    fp_out = fopen(outputfile, "w");
+    assert(fp && fp_out);
+
+    printf("## starting the process..\n");
+
+    gettimeofday(&start, NULL);
+
+    while (fgets(linebuf, LINE_MAX-1, fp) != NULL) {
+        oid = read_object_id(linebuf);
+
+        EXEC SQL
+            with fullpath (depth, object_id, parent_id, path) as (
+            select 0, object_id, parent_id, '/' || name from nsobject
+            where object_id= :oid
+            union all
+            select f.depth+1, n.object_id, n.parent_id, '/' || name || f.path
+            from fullpath f, nsobject n where f.parent_id = n.object_id)
+            select path into :path
+            from fullpath where parent_id=1;
+
+        if (sqlca.sqlcode < 0) {
+            printf("sqlcode = %d\n", sqlca.sqlcode);
+            DUMP_SQLCA();
+            break;
+        }
+
+        fprintf(fp_out, "%s,%s\n", linebuf, path);
+
+        count++;
+
+        if (test_count > 0 && count >= test_count)
+            break;
+    }
+    if (ferror(fp))
+        perror("fgets");
+
+    fclose(fp_out);
+    fclose(fp);
+
+    gettimeofday(&end, NULL);
+
+    printf("## done.\n");
+
+    EXEC SQL CONNECT RESET;
+
+    elapsed = timediff(&start, &end);
+
+    printf("## took %.6lf seconds to process %lu records (%.3lf rec/sec).\n",
+           elapsed, count, 1.0F*count/elapsed);
+
+    return ret;
+}
+

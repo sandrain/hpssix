@@ -1,0 +1,34 @@
+Description of files in this folder
+
+- the four scripts are for
+-- Getting the initial snapshot from DB2 (hpss_intial_query.ksh)
+-- New entries on a daily basis (hpss_new_inserts_query.ksh)
+-- Deleted entries (hpss_deletes_query.ksh)
+-- Entries that have been updated (hpss_updates_query.ksh)
+
+-schema.sql is the PostGRESql schema file
+
+Mgmt and access of the postgreSQL db on hpss-dev-md-index1.ccs.ornl.gov
+
+Admin access
+username: postgres
+password: hpssmduser
+> psql -h localhost -U postgres -W
+or
+switch to postgres user and login for admin privilges
+> sudo su - postgres
+> psql
+
+
+User access
+username: hpssmduser
+password: hpssmduser
+database: hpssmddb
+> psql -h localhost -d hpssmddb -U hpssmduser -W
+
+
+Importing data from csv
+\copy <table_name> FROM '<PATH_NAME>' DELIMITER ',' CSV
+
+
+

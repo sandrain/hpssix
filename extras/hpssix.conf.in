@@ -1,0 +1,62 @@
+# HPSSIX configuration.
+
+hpssix:
+{
+    workdir = "@localstatedir@/hpssix";
+    schedule = "01:00:00";  # time when the indexing is performed (HH:mm:ss)
+    rpctimeout = 14400;     # in seconds
+    firstoid = 6000000;
+}
+
+tagging:
+{
+    prefix = "hpssix";  # namespace prefix (user.XX...)
+}
+
+## hpss configuration
+hpss:
+{
+    mountpoint = "/var/hpss/mnt";
+    host = "hpss-dev-md-index1.ccs.ornl.gov";
+    db2path = "/opt/ibm/db2/default";
+    db2user = "username";
+    db2password = "password";
+}
+
+## postgresql database for our indexing
+database:
+{
+    host = "hpss-dev-md-index2.ccs.ornl.gov";
+    port = 5432;
+    user = "username";
+    password = "password";
+    database = "dbname";
+}
+
+## tika server for extracting the metadata
+tika:
+{
+    host = "hpss-dev-md-index3.ccs.ornl.gov";
+    port = 9998;
+}
+
+## scanner
+scanner:
+{
+    host = "hpss-dev-md-index1.ccs.ornl.gov";
+}
+
+## builder
+builder:
+{
+    host = "hpss-dev-md-index2.ccs.ornl.gov";
+}
+
+## extractor
+extractor:
+{
+    host = "hpss-dev-md-index3.ccs.ornl.gov";
+    maxfilesize = 10485760;
+    nthreads = 4;
+}
+

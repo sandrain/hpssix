@@ -1,0 +1,333 @@
+#!/bin/bash
+#
+# usage: hpssix-db2-new-insert.sh <db2cmd> <db2user> <db2password> \
+#                                 <last object_id> <fromdate> <outdir> <ts>
+#
+
+function die() {
+    echo "## ERROR: $1"
+    exit 1
+}
+
+function timestamp() {
+	date +"%s.%N"
+}
+
+# $1: before, $2: after
+function timegap() {
+	echo "scale=9; $2 - $1" | bc -l
+}
+
+
+if [ $# -ne 7 ]; then
+    die "Please check the usage."
+fi
+
+db2cli="$1"
+db2user="$2"
+db2password="$3"
+last_object_id="$4"
+fromdate="$5"
+outdir="$6"
+ts="$7"
+
+## db2 command line options
+# -s: stop execution if error occurs
+# -t: use semicolon (;) as the statement termination character
+# -v: echo command to stdout
+db2cmd="$db2cli -stv"
+
+out_fattr="${outdir}/scanner.${ts}.fattr.csv"
+out_path="${outdir}/scanner.${ts}.path.csv"
+out_xattr="${outdir}/scanner.${ts}.xattr.csv"
+out_deleted="${outdir}/scanner.${ts}.deleted.csv"
+
+temp_target_objects="with target_objects (object_id) as (
+  select n.object_id from nsobject n inner join
+    (select distinct object_id from nsobject_history
+    where sys_end > '${fromdate}' and object_id <= ${last_object_id}) h
+    on n.object_id = h.object_id
+  union all
+  select n.object_id from nsobject n where object_id > ${last_object_id})"
+
+sql_fattr="export to ${out_fattr} of del
+${temp_target_objects}
+select
+  n.object_id,
+  coalesce(ascii(n.type), 0),
+  coalesce(ascii(n.user_perms), 0),
+  coalesce(ascii(n.group_perms), 0),
+  coalesce(ascii(n.other_perms), 0),
+  coalesce(b.bfattr_link_count, 0),
+  coalesce(n.uid, 0),
+  coalesce(n.gid, 0),
+  coalesce(b.bfattr_data_len, 0),
+  coalesce(b.bfattr_read_time, 0),
+  coalesce(b.bfattr_write_time, 0),
+  coalesce(b.bfattr_modify_time, 0)
+from
+  nsobject n
+    inner join target_objects on n.object_id = target_objects.object_id
+    left outer join bitfile b on n.bitfile_id = b.bfid
+order by n.object_id asc;
+"
+
+sql_path="export to ${out_path} of del
+${temp_target_objects},
+fullpath (leaf, object_id, parent_id, path) as (
+  select object_id as leaf, object_id, parent_id, '/' || name from nsobject
+    where object_id in (select object_id from target_objects)
+  union all
+  select p.leaf as leaf, n.object_id, n.parent_id, '/' || name || p.path
+    from fullpath p, nsobject n where p.parent_id = n.object_id)
+select
+  t.object_id,
+  f.path
+from target_objects t
+  join fullpath f on t.object_id = f.leaf
+where parent_id = 1 order by t.object_id asc;
+"
+
+sql_xattr="export to ${out_xattr} of del
+${temp_target_objects}
+select
+  u.object_id,
+  xmlserialize(u.attributes as clob)
+from userattrs u
+  inner join target_objects on u.object_id = target_objects.object_id;
+"
+
+sql_deleted="export to ${out_deleted} of del
+select h.object_id
+from (select distinct object_id from nsobject_history
+      where sys_end > '${fromdate}') h
+  left outer join (select object_id from nsobject) n
+     on h.object_id = n.object_id
+where n.object_id is null order by h.object_id;
+"
+
+## execute queries
+
+$db2cmd connect to hsubsys1 user $db2user using $db2password \
+    || die "connect to database failed"
+
+$db2cmd set schema hpss || die "failed to set hpss schema"
+
+t_start=$(timestamp)
+
+t1=$(timestamp)
+$db2cmd "$sql_fattr"
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo "## collecting fattr: $tt seconds"
+echo
+
+t1=$(timestamp)
+$db2cmd "$sql_path"
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo "## collecting path: $tt seconds"
+echo
+
+t1=$(timestamp)
+$db2cmd "$sql_xattr"
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo "## collecting xattr: $tt seconds"
+echo
+
+t1=$(timestamp)
+$db2cmd "$sql_deleted"
+t2=$(timestamp)
+tt=$(timegap $t1 $t2)
+echo "## collecting deleted: $tt seconds"
+echo
+
+t_end=$(timestamp)
+
+total_tt=$(timegap $t_start $t_end)
+end_oid="`tail -n1 ${out_fattr} | cut -f1 -d','`"
+new_count="`cat ${out_fattr} | wc -l`"
+deleted_count="`cat ${out_deleted} | wc -l`"
+
+echo
+echo "## start oid: $((last_object_id+1))"
+echo "## end oid: ${end_oid}"
+echo "## scanned: $new_count"
+echo "## deleted: $deleted_count"
+echo "## total execution: $total_tt seconds"
+
+exit 0
+
+#######################################################################
+## below is obsolete
+#######################################################################
+
+#out_new="${outdir}/scanner.${ts}.new.csv"
+#out_updated="${outdir}/scanner.${ts}.updated.csv"
+#out_deleted="${outdir}/scanner.${ts}.deleted.csv"
+#
+#echo
+#echo "## scanning after oid ${last_object_id} .."
+#echo
+#
+#insert_sql="export to ${out_new} of del
+#with \
+#fullpath (leaf, object_id, parent_id, path) as ( \
+#    select object_id as leaf, object_id, parent_id, '/' || name from nsobject \
+#        where object_id > ${last_object_id} \
+#    union all \
+#    select p.leaf as leaf, n.object_id, n.parent_id, '/' || name || p.path \
+#        from fullpath p, nsobject n where p.parent_id = n.object_id), \
+#attr (object_id, type, uid, gid, uperm, gperm, operm, nlink, \
+#      atime, mtime, ctime, cos, size, tags, name) as ( \
+#    select \
+#        n.object_id as object_id, \
+#        ascii(n.type) as type, \
+#        n.uid as uid, \
+#        n.gid as gid, \
+#        ascii(n.user_perms) as uperm, \
+#        ascii(n.group_perms) as gperm, \
+#        ascii(n.other_perms) as operm, \
+#        b.bfattr_link_count as nlink, \
+#        b.bfattr_read_time as atime, \
+#        b.bfattr_write_time as mtime, \
+#        b.bfattr_modify_time as ctime, \
+#        b.bfattr_cos_id as cos, \
+#        b.bfattr_data_len as size, \
+#        xmlserialize(u.attributes as clob) as tags, \
+#        n.name as name \
+#    from (select object_id, \
+#                 type, \
+#                 uid, \
+#                 gid, \
+#                 user_perms, \
+#                 group_perms, \
+#                 other_perms, \
+#                 name, \
+#                 bitfile_id \
+#          from nsobject \
+#          where object_id > ${last_object_id}) n \
+#        left outer join bitfile b on n.bitfile_id = b.bfid \
+#        left outer join userattrs u on n.object_id = u.object_id) \
+#select \
+#    a.object_id, \
+#    COALESCE(a.type, 0), \
+#    COALESCE(a.uperm, 0), \
+#    COALESCE(a.gperm, 0), \
+#    COALESCE(a.operm, 0), \
+#    COALESCE(a.nlink, 0), \
+#    COALESCE(a.uid, 0), \
+#    COALESCE(a.gid, 0), \
+#    COALESCE(a.size, 0), \
+#    COALESCE(a.atime, 0), \
+#    COALESCE(a.mtime, 0), \
+#    COALESCE(a.ctime, 0), \
+#    f.path, \
+#    a.tags \
+#from attr a join fullpath f on a.object_id = f.leaf \
+#    where f.parent_id = 1 order by a.object_id asc"
+#
+##          where object_id > ${last_object_id} or \
+##                object_id in (select object_id from nsobject_history \
+##                              where sys_end > '${fromdate}')) n \
+#
+#update_sql="export to ${out_updated} of del
+#with \
+#fullpath (leaf, object_id, parent_id, path) as ( \
+#    select object_id as leaf, object_id, parent_id, '/' || name from nsobject \
+#        where object_id in (select object_id from nsobject_history \
+#                            where sys_end > '${fromdate}') \
+#    union all \
+#    select p.leaf as leaf, n.object_id, n.parent_id, '/' || name || p.path \
+#        from fullpath p, nsobject n where p.parent_id = n.object_id), \
+#attr (object_id, type, uid, gid, uperm, gperm, operm, nlink, \
+#      atime, mtime, ctime, cos, size, tags, name) as ( \
+#    select \
+#        n.object_id as object_id, \
+#        ascii(n.type) as type, \
+#        n.uid as uid, \
+#        n.gid as gid, \
+#        ascii(n.user_perms) as uperm, \
+#        ascii(n.group_perms) as gperm, \
+#        ascii(n.other_perms) as operm, \
+#        b.bfattr_link_count as nlink, \
+#        b.bfattr_read_time as atime, \
+#        b.bfattr_write_time as mtime, \
+#        b.bfattr_modify_time as ctime, \
+#        b.bfattr_cos_id as cos, \
+#        b.bfattr_data_len as size, \
+#        xmlserialize(u.attributes as clob) as tags, \
+#        n.name as name \
+#    from (select object_id, \
+#                 type, \
+#                 uid, \
+#                 gid, \
+#                 user_perms, \
+#                 group_perms, \
+#                 other_perms, \
+#                 name, \
+#                 bitfile_id \
+#          from nsobject \
+#          where object_id in (select object_id from nsobject_history \
+#                              where sys_end > '${fromdate}')) n \
+#        left outer join bitfile b on n.bitfile_id = b.bfid \
+#        left outer join userattrs u on n.object_id = u.object_id) \
+#select \
+#    a.object_id, \
+#    COALESCE(a.type, 0), \
+#    COALESCE(a.uperm, 0), \
+#    COALESCE(a.gperm, 0), \
+#    COALESCE(a.operm, 0), \
+#    COALESCE(a.nlink, 0), \
+#    COALESCE(a.uid, 0), \
+#    COALESCE(a.gid, 0), \
+#    COALESCE(a.size, 0), \
+#    COALESCE(a.atime, 0), \
+#    COALESCE(a.mtime, 0), \
+#    COALESCE(a.ctime, 0), \
+#    f.path, \
+#    a.tags \
+#from attr a join fullpath f on a.object_id = f.leaf \
+#    where f.parent_id = 1 order by a.object_id asc"
+#
+#delete_sql="export to ${out_deleted} of del \
+#            select h.object_id \
+#            from (select distinct object_id from nsobject_history \
+#                where sys_end > '${fromdate}') h \
+#            left outer join (select object_id from nsobject) n \
+#            on h.object_id = n.object_id \
+#            where n.object_id is null order by h.object_id"
+#
+#echo "## insert: $insert_sql"
+#echo "## update: $update_sql"
+#echo "## delete: $delete_sql"
+#
+#$db2cmd connect to hsubsys1 user $db2user using $db2password \
+#        || die "connect to database failed"
+#
+#$db2cmd set schema hpss || die "failed to set schema hpss"
+#
+#$db2cmd "$insert_sql"
+#
+#$db2cmd "$update_sql"
+#
+#$db2cmd "$delete_sql"
+#
+#$db2cmd connect reset
+#
+#start_oid=$((last_object_id-1))
+#end_oid="`tail -n1 $out_new | cut -f1 -d','`"
+#new_count="`wc -l $out_new | cut -f1 -d' '`"
+#updated_count="`wc -l $out_updated | cut -f1 -d' '`"
+#deleted_count="`wc -l $out_deleted | cut -f1 -d' '`"
+#
+#echo
+#echo "## start oid: $start_oid"
+#echo "## end oid: $end_oid"
+#echo "## new: $new_count"
+#echo "## updated: $updated_count"
+#echo "## deleted: $deleted_count"
+#
+#exit 0
+
