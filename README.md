@@ -43,7 +43,8 @@ $ hpssix-meta --text /var/hpss/mnt/home/hs2/tests/documents/projects/project-pos
 
 The architecture is summarized in the following slides.
 
-* [HPSS Metadata Indexing slides](https://drive.google.com/file/d/13T_HOQbkeJbNtdTiP2Xr5OMhA1d2HKED/view?usp=sharing)
+* Hyogi Sim, [Extracting Metadata from the ORNL HPSS Archive to Improve its Usability](https://drive.google.com/file/d/1uy5P7APg8PVgh5Pmcc8cuoOWfSlvMEUo/view?usp=sharing), “Knowledge Is Power:Unleashing the Potential of Your Archives through Metadata” BoF in ACM/IEEE International Conferenece for HighPerformance Computing, Networking, Storage, and Analysis (SC), Denver, CO, November 2019
+* Hyogi Sim, [Making a Peta-Scale Archival Storage System Searchable](https://drive.google.com/file/d/1_rWzjdxsvgKNbk-F-DSDScqppxlWyE1M/view?usp=sharing), High Performance Storage Systems User Forum2019 (HUF 2019), Indiana University, Bloomington, IN, October 2019
 * [Performance test](https://docs.google.com/presentation/d/1a6zdbaiwfsCqKLf3YJ9bEb0zQhlctn3s6l8WdPeVzZQ/edit?usp=sharing)
 
 This work was presented in the following events.
